@@ -1,8 +1,12 @@
 # Tabular-to-Image Encoding Dissection
 
+[![Release](https://img.shields.io/github/v/release/Jackxiaozhiren/tabular-image-encoding-dissection?label=release)](https://github.com/Jackxiaozhiren/tabular-image-encoding-dissection/releases/tag/v1.0.0)
+
 Reproducibility repository for the Data Mining and Knowledge Discovery (DMKD) manuscript:
 
 **Dissecting tabular-to-image encodings for CNNs: categorical features, not the image form, are the primary driver of accuracy gains**
+
+The frozen scientific snapshot is **[`v1.0.0`](https://github.com/Jackxiaozhiren/tabular-image-encoding-dissection/releases/tag/v1.0.0)**.
 
 ## What the study finds
 
@@ -66,7 +70,7 @@ The manuscript reports Python 3.9, PyTorch 2.8 on Apple MPS, XGBoost 2.1, LightG
 
 ## Historical note
 
-The repository originally accompanied a Neurocomputing submission and contained only the earlier 5-dataset / scripts-01–09 state. The DMKD manuscript expanded the study to 15 datasets, added FT-Transformer/IGTD controls, a second CNN backbone, and additional sensitivity analyses. The `v1.0.0` release is intended to freeze the DMKD manuscript-active state; earlier Git history remains available for provenance.
+The repository originally accompanied a Neurocomputing submission and contained only the earlier 5-dataset / scripts-01–09 state. The DMKD manuscript expanded the study to 15 datasets, added FT-Transformer/IGTD controls, a second CNN backbone, and additional sensitivity analyses. The immutable `v1.0.0` release freezes the audited DMKD manuscript-active state; earlier Git history remains available for provenance. Documentation-only changes on `main` after release do not alter that frozen scientific snapshot.
 
 ## Citation
 
