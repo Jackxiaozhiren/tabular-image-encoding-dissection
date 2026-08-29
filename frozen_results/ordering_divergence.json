@@ -1,0 +1,101 @@
+{
+  "adult": {
+    "dataset": "adult",
+    "n_numeric": 6,
+    "rank_corr": {
+      "importance_vs_corr": [
+        0.4666666666666666,
+        0.5428571428571429
+      ],
+      "importance_vs_shap": [
+        0.3333333333333333,
+        0.48571428571428577
+      ],
+      "corr_vs_shap": [
+        0.6,
+        0.7142857142857143
+      ]
+    },
+    "order_importance": [
+      "education_num",
+      "capital_gain",
+      "capital_loss",
+      "age",
+      "hours_per_week",
+      "fnlwgt"
+    ],
+    "order_shap": [
+      "age",
+      "capital_gain",
+      "education_num",
+      "hours_per_week",
+      "capital_loss",
+      "fnlwgt"
+    ],
+    "order_corr": [
+      "education_num",
+      "age",
+      "hours_per_week",
+      "capital_gain",
+      "capital_loss",
+      "fnlwgt"
+    ]
+  },
+  "wine": {
+    "dataset": "wine",
+    "n_numeric": 11,
+    "rank_corr": {
+      "importance_vs_corr": [
+        0.5272727272727272,
+        0.6818181818181819
+      ],
+      "importance_vs_shap": [
+        0.6363636363636364,
+        0.7636363636363637
+      ],
+      "corr_vs_shap": [
+        0.23636363636363636,
+        0.33636363636363636
+      ]
+    },
+    "order_importance": [
+      "alcohol",
+      "chlorides",
+      "density",
+      "free_sulfur_dioxide",
+      "volatile_acidity",
+      "residual_sugar",
+      "total_sulfur_dioxide",
+      "pH",
+      "citric_acid",
+      "fixed_acidity",
+      "sulphates"
+    ],
+    "order_shap": [
+      "alcohol",
+      "chlorides",
+      "volatile_acidity",
+      "free_sulfur_dioxide",
+      "residual_sugar",
+      "citric_acid",
+      "pH",
+      "total_sulfur_dioxide",
+      "density",
+      "fixed_acidity",
+      "sulphates"
+    ],
+    "order_corr": [
+      "alcohol",
+      "density",
+      "chlorides",
+      "total_sulfur_dioxide",
+      "residual_sugar",
+      "pH",
+      "fixed_acidity",
+      "volatile_acidity",
+      "citric_acid",
+      "free_sulfur_dioxide",
+      "sulphates"
+    ]
+  }
+}

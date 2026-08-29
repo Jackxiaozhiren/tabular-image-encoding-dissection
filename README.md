@@ -1,61 +1,77 @@
-# README — Reproduction guide
+# Tabular-to-Image Encoding Dissection
 
-Reproduces every number in **"Dissecting image encodings of tabular data:
-categorical features drive gains, while channel separation, feature reordering,
-and the image form do not"** (Neurocomputing submission).
+Reproducibility repository for the Data Mining and Knowledge Discovery (DMKD) manuscript:
+
+**Dissecting tabular-to-image encodings for CNNs: categorical features, not the image form, are the primary driver of accuracy gains**
+
+## What the study finds
+
+Across 15 public tabular datasets and three fixed seeds (42, 123, 2024), the manuscript-active analysis isolates four design choices in tabular-to-image classifiers: categorical inclusion, channel separation, feature reordering, and the image form itself.
+
+The frozen manuscript evidence shows:
+
+- removing the categorical channel from M3 lowers AUC across the 10 mixed-type datasets (pooled seed×dataset Wilcoxon `n=30`, `p=3.80e-05`, Holm-significant; dataset-median sensitivity `p=0.00390625`);
+- Adult: M3-full AUC `0.9091` vs M3-noG `0.8471`;
+- Bank: M3-full AUC `0.9249` vs M3-noG `0.8665`;
+- the same-feature MLP vs M3-full contrast does not reject parity (`p=0.1256`);
+- feature-reordering/B-channel contrasts are small and not Holm-significant;
+- the second ResNet-style backbone preserves the categorical-effect direction, while the dataset-median sensitivity weakens to `p=0.06445`.
+
+These are model-level benchmark results under the stated protocol, not claims of universal superiority or deployment performance.
+
+## Repository map
+
+- `01_download_clean.py` — download/clean/preprocess the 15 datasets.
+- `03_train_baseline.py` — XGBoost baseline and feature importance.
+- `04_train_cnn.py` — CNN probe and ResNet-style backbone for M1/M1c/M2/M3 variants.
+- `07_train_modern_baselines.py` — LightGBM, CatBoost, MLP, FT-Transformer and validation-ES XGBoost.
+- `08_extended_evaluate.py` — manuscript tables, DeLong/McNemar tests, pooled Wilcoxon and Holm correction.
+- `10_published_encodings.py` + `igtd_encoder.py` — published IGTD control.
+- `11_resnet_analysis.py` — second-backbone robustness analysis.
+- `frozen_results/` — small aggregate evidence files used to audit the manuscript-active claims without committing raw data, row-level predictions, or model checkpoints.
+- `number_mapping.md` — manuscript number → script/artifact crosswalk.
+- `docs/REPRODUCIBILITY.md` — exact release boundary and reproduction guidance.
+
+## Quick verification
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m compileall -q .
+python 08_extended_evaluate.py   # after training/frozen NPZ artifacts are present under data/
+python 11_resnet_analysis.py
+python make_tables.py
+```
+
+For a lightweight repository integrity check used by CI:
+
+```bash
+pip install -r requirements-ci.txt
+python -m unittest discover -s tests -v
+python tools/verify_frozen_results.py
+```
+
+## Full experiment protocol
+
+The full command sequence is documented in `docs/REPRODUCIBILITY.md`. The analysis uses 15 public datasets, fixed seeds `{42, 123, 2024}`, training-split-only preprocessing and ordering weights, and two CNN backbones. Statistical tests and aggregation conventions are documented in `number_mapping.md`.
+
+## Data and artifact boundary
+
+This repository does **not** redistribute raw UCI/OpenML downloads, cached raw files, row-level predictions, processed arrays, or `.pt` checkpoints. The scripts retrieve the public datasets and regenerate the experiment artifacts. Small aggregate JSON/CSV evidence is committed under `frozen_results/` so that headline values and statistical claims can be independently checked.
 
 ## Environment
 
-```
-pip install -r requirements.txt        # Python 3.9+
-```
+The manuscript reports Python 3.9, PyTorch 2.8 on Apple MPS, XGBoost 2.1, LightGBM 4.6, CatBoost 1.2, and Matplotlib 3.9.4. `requirements.txt` is a compatibility specification, not a claim of bit-exact cross-device reproduction. See `docs/REPRODUCIBILITY.md`.
 
-## Scripts and pipeline
+## Historical note
 
-| Script | Purpose |
-|---|---|
-| `01_download_clean.py` | Download + clean + preprocess datasets into `data/{name}_arrays.npz` |
-| `02_visualize_encoding.py` | Generate encoding example figures |
-| `03_train_baseline.py` | Train XGBoost baseline + feature/SHAP importances |
-| `04_train_cnn.py` | Train CNN on encodings (M1/M1c/M2/M3-variants), 3 seeds |
-| `05_evaluate_compare.py` | Aggregate metrics, McNemar/DeLong tests, ROC/PR |
-| `06_ordering_analysis.py` | Kendall-tau ordering divergence diagnostic |
-| `07_train_modern_baselines.py` | LightGBM/CatBoost/MLP + XGBoost (val-ES) baselines |
-| `08_extended_evaluate.py` | Full comparison + cross-dataset Wilcoxon/Holm |
-| `09_make_figures.py` | Vector (PDF) publication figures |
+The repository originally accompanied a Neurocomputing submission and contained only the earlier 5-dataset / scripts-01–09 state. The DMKD manuscript expanded the study to 15 datasets, added FT-Transformer/IGTD controls, a second CNN backbone, and additional sensitivity analyses. The `v1.0.0` release is intended to freeze the DMKD manuscript-active state; earlier Git history remains available for provenance.
 
-Supporting modules: `datasets.py` (dataset registry + preprocessing),
-`tabular_to_image.py` (M1/M1c/M2/M3 encoders).
+## Citation
 
-## Full reproduction (all datasets)
+Use GitHub's **Cite this repository** metadata from `CITATION.cff`. After journal publication, add the article as `preferred-citation` without rewriting the frozen software release.
 
-```bash
-python3 01_download_clean.py --datasets adult,heart,wine,bank,credit
-python3 03_train_baseline.py --dataset adult   # (repeat for heart, wine, bank, credit)
-python3 07_train_modern_baselines.py --datasets adult,heart,wine,bank,credit
-python3 04_train_cnn.py --dataset adult --tags M1,M1c,M2,M3-full,M3-noG,M3-noB,M3-corrB,M3-shapB
-python3 04_train_cnn.py --dataset heart --tags M1,M1c,M2,M3-full,M3-noG,M3-noB
-python3 04_train_cnn.py --dataset wine --tags M1,M1c,M2,M3-full,M3-noG,M3-noB,M3-corrB,M3-shapB
-python3 04_train_cnn.py --dataset bank --tags M1,M1c,M2,M3-full,M3-noG,M3-noB
-python3 04_train_cnn.py --dataset credit --tags M1,M1c,M2,M3-full,M3-noG,M3-noB
-python3 08_extended_evaluate.py          # comparison tables + Wilcoxon/Holm
-python3 06_ordering_analysis.py --datasets adult,wine
-python3 09_make_figures.py               # vector figures
-```
+## License
 
-## Conventions
-
-- **Seeds**: {42, 123, 2024}; tables report mean±std of per-seed metrics.
-- **Aggregation**: statistical tests (McNemar, DeLong) and ROC/PR curves use
-  the three-seed-averaged predictions; tables report per-seed mean±std.
-- **Early stopping**: on a stratified 10% validation split (patience 7 for
-  CNN/MLP, 20 for trees).
-- **Heart** uses class-weighted loss; Heart and Wine use stratified 75/25 splits
-  after duplicate removal (Wine: 4,898 → 3,961 rows).
-
-## Data
-
-All datasets are public from the UCI Machine Learning Repository:
-Adult (Census Income), Heart Disease (Cleveland), Wine Quality (White),
-Bank Marketing, Credit Card Default. `01_download_clean.py` downloads and
-caches them into `data/`.
+MIT for project-authored code and documentation. Third-party datasets and reference implementations remain subject to their original terms.

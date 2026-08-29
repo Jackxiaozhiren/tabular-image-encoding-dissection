@@ -38,24 +38,35 @@ plt.rcParams.update({
 # 色盲友好调色板 (Okabe-Ito)
 C = {
     "XGBoost": "#0072B2", "LightGBM": "#56B4E9", "CatBoost": "#009E73",
-    "MLP": "#E69F00", "CNN-M1": "#D55E00", "CNN-M1c": "#CC79A7",
-    "CNN-M2": "#8C8C8C", "CNN-M3-full": "#000000", "CNN-M3-noG": "#F0E442",
+    "MLP": "#E69F00", "FT-Transformer": "#C44E52", "CNN-M1": "#D55E00",
+    "CNN-M1c": "#CC79A7", "CNN-M2": "#8C8C8C", "CNN-M3-RG": "#BEBADA",
+    "CNN-M3-full": "#000000", "CNN-M3-noG": "#F0E442",
     "CNN-M3-noB": "#66C2A5", "CNN-M3-corrB": "#A6D854", "CNN-M3-shapB": "#E78AC3",
+    "CNN-IGTD": "#B2182B",
 }
 
 # 精选方法集（避免曲线过密）
-PLOT_METHODS = ["XGBoost", "MLP", "CNN-M1", "CNN-M1c", "CNN-M3-full", "CNN-M3-noG"]
+PLOT_METHODS = ["XGBoost", "FT-Transformer", "MLP", "CNN-M1", "CNN-M1c",
+                "CNN-M3-RG", "CNN-M3-full", "CNN-IGTD"]
 
 FILE_MAP = {
     "XGBoost": "xgb", "LightGBM": "lgb", "CatBoost": "cat", "MLP": "mlp",
+    "FT-Transformer": "ft",
     "CNN-M1": "cnn_M1", "CNN-M1c": "cnn_M1c", "CNN-M2": "cnn_M2",
     "CNN-M3-full": "cnn_M3-full", "CNN-M3-noG": "cnn_M3-noG",
     "CNN-M3-noB": "cnn_M3-noB", "CNN-M3-corrB": "cnn_M3-corrB",
-    "CNN-M3-shapB": "cnn_M3-shapB",
+    "CNN-M3-shapB": "cnn_M3-shapB", "CNN-M3-RG": "cnn_M3-RG",
+    "CNN-IGTD": "cnn_IGTD",
 }
 DATASET_LABEL = {"adult": "UCI Adult", "heart": "UCI Heart", "wine": "UCI Wine",
-                 "bank": "UCI Bank", "credit": "UCI Credit"}
-ALL_DATASETS = ["adult", "heart", "wine", "bank", "credit"]
+                 "bank": "UCI Bank", "credit": "UCI Credit",
+                 "german": "UCI German", "telco": "Telco Churn", "sick": "UCI Sick",
+                 "australian": "Austral. Credit", "cmc": "UCI CMC",
+                 "ilpd": "ILPD", "segment": "Segmentation", "vehicle": "Vehicle",
+                 "spambase": "Spambase", "magic": "MAGIC"}
+ALL_DATASETS = ["adult", "heart", "wine", "bank", "credit", "german", "telco",
+                "sick", "australian", "cmc", "ilpd", "segment", "vehicle",
+                "spambase", "magic"]
 
 
 def load(name, tag):
@@ -215,35 +226,36 @@ def fig_encodings():
 
 
 def fig_auc_summary():
-    """跨数据集 AUC 汇总条形图（mean±std over seeds）。"""
-    rows = []
-    for name in ALL_DATASETS:
-        for m in PLOT_METHODS + ["LightGBM"]:
+    """跨資料集 AUC 熱圖（方法 × 資料集，格=mean AUC over seeds）。"""
+    order = ["XGBoost", "FT-Transformer", "MLP", "CNN-M1", "CNN-M1c",
+             "CNN-M3-RG", "CNN-M3-full"]
+    ds_list = ALL_DATASETS
+    mat = np.full((len(ds_list), len(order)), np.nan)
+    for i, name in enumerate(ds_list):
+        for j, m in enumerate(order):
             r = load(name, FILE_MAP[m])
             if r is None:
                 continue
             psp = np.load(os.path.join(DATA_DIR, f"{name}_{FILE_MAP[m]}_results.npz"))["per_seed_probs"]
             y = r[1]
             aucs = [roc_auc_score(y, psp[s]) for s in range(psp.shape[0])]
-            rows.append((name, m, np.mean(aucs), np.std(aucs)))
-    order = ["XGBoost", "LightGBM", "MLP", "CNN-M1", "CNN-M1c", "CNN-M3-full", "CNN-M3-noG"]
-    fig, ax = plt.subplots(figsize=(8.6, 4.6))
-    width = 0.17
-    colors = ["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854"]
-    for k, ds in enumerate(ALL_DATASETS):
-        vals = [next((r for r in rows if r[0] == ds and r[1] == m), None) for m in order]
-        xs = np.arange(len(order)) + (k - 2) * width
-        means = [v[2] if v else np.nan for v in vals]
-        stds = [v[3] if v else 0 for v in vals]
-        ax.bar(xs, means, width, yerr=stds, capsize=2, label=DATASET_LABEL[ds],
-               color=colors[k], alpha=0.9, edgecolor="#333333", lw=0.5)
+            mat[i, j] = np.mean(aucs)
+    fig, ax = plt.subplots(figsize=(7.4, 5.6))
+    cmap = matplotlib.colormaps["YlGnBu"] if hasattr(matplotlib, "colormaps") else matplotlib.cm.YlGnBu
+    im = ax.imshow(mat, cmap=cmap, aspect="auto", vmin=0.55, vmax=1.0)
     ax.set_xticks(np.arange(len(order)))
     ax.set_xticklabels(order, rotation=30, ha="right", fontsize=8)
-    ax.set_ylabel("AUC (mean ± std over seeds)")
-    ax.set_ylim(0.4, 1.0)
-    ax.legend(frameon=False, fontsize=8)
-    ax.axhline(0.9, color="#999999", ls=":", lw=0.8)
-    ax.set_title("Test-set AUC across datasets and methods", fontsize=10)
+    ax.set_yticks(np.arange(len(ds_list)))
+    ax.set_yticklabels([DATASET_LABEL[d] for d in ds_list], fontsize=8)
+    for i in range(len(ds_list)):
+        for j in range(len(order)):
+            v = mat[i, j]
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                        fontsize=6.5, color="white" if v < 0.82 else "#222222")
+    ax.set_title("Test-set AUC: methods (columns) × datasets (rows)", fontsize=10)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("AUC", fontsize=8)
     plt.tight_layout()
     fig.savefig(os.path.join(FIG, "fig_auc_summary.pdf"), bbox_inches="tight")
     fig.savefig(os.path.join(FIG, "fig_auc_summary.png"), bbox_inches="tight")

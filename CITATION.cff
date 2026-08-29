@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use these reproducibility materials, please cite this software repository and, once published, the associated article."
+title: "Tabular-to-Image Encoding Dissection: DMKD Reproducibility Materials"
+type: software
+version: 0.9.0
+authors:
+  - family-names: Xiao
+    given-names: Zhiren
+repository-code: "https://github.com/Jackxiaozhiren/tabular-image-encoding-dissection"
+url: "https://github.com/Jackxiaozhiren/tabular-image-encoding-dissection"
+license: MIT
+abstract: "Reproducibility materials for a 15-dataset controlled dissection of categorical inclusion, channel separation, feature reordering, and image formulation in tabular-to-image CNN classifiers."
+keywords:
+  - tabular data
+  - image encoding
+  - categorical features
+  - convolutional neural networks
+  - ablation study
+  - reproducibility

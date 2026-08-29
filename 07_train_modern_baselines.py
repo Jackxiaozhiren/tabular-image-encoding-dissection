@@ -26,11 +26,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                              f1_score, roc_auc_score)
 from datasets import DATASETS, DATA_DIR
+from ft_transformer import train_ft
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SEEDS = [42, 123, 2024]
 METRIC_NAMES = ["Accuracy", "Precision", "Recall", "F1", "AUC"]
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("mps" if torch.backends.mps.is_available()
+                      else "cuda" if torch.cuda.is_available() else "cpu")
 
 
 def load_data(name):
@@ -40,13 +42,14 @@ def load_data(name):
             npz["X_train_cat"], npz["X_test_cat"])
 
 
-def one_hot_cats(X_cat):
+def one_hot_cats(X_cat, cardinalities=None):
     """把 label-encoded 类别矩阵转成 one-hot。回传稀疏友好的 (n, sum(n_cat)) float32。
-    每个类别特征以 train+test 合并的最大索引 +1 决定维度（覆盖所有已见类别）。"""
+    默认以该矩阵的最大索引 +1 决定维度；传入 cardinalities（须以训练集计算）
+    则 train/test 共用同一维度，避免 train/test 基数不一致导致宽度错位。"""
     parts = []
     for j in range(X_cat.shape[1]):
         col = X_cat[:, j]
-        n_cat = int(np.max(col)) + 1
+        n_cat = cardinalities[j] if cardinalities is not None else int(np.max(col)) + 1
         oh = np.zeros((len(col), n_cat), dtype=np.float32)
         oh[np.arange(len(col)), col.astype(int)] = 1.0
         parts.append(oh)
@@ -116,8 +119,9 @@ def train_mlp(name, X_train_num, X_train_cat, y_train,
     """MLP 决定性对照：输入 = MinMax 数值 + One-Hot 类别（与 M3 的 R+G 通道同特征）。
     Adam lr=1e-3、wd=1e-4、batch 256、分层 10% 验证集早停（patience 7，max 40 epochs），
     与 CNN 协议一致。"""
-    Xtr = np.hstack([X_train_num, one_hot_cats(X_train_cat)])
-    Xte = np.hstack([X_test_num, one_hot_cats(X_test_cat)])
+    card = [int(X_train_cat[:, j].max()) + 1 for j in range(X_train_cat.shape[1])]
+    Xtr = np.hstack([X_train_num, one_hot_cats(X_train_cat, card)])
+    Xte = np.hstack([X_test_num, one_hot_cats(X_test_cat, card)])
     Xtr_t = torch.tensor(Xtr, dtype=torch.float32, device=DEVICE)
     Xte_t = torch.tensor(Xte, dtype=torch.float32, device=DEVICE)
     ytr_t = torch.tensor(y_train, dtype=torch.float32, device=DEVICE)
@@ -173,8 +177,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--datasets", default="adult,heart,wine")
     ap.add_argument("--skip-trees", action="store_true",
-                    help="跳过 GBDT 家族（只跑 MLP）")
+                    help="跳过 GBDT 家族（只跑 MLP/FT）")
     ap.add_argument("--skip-mlp", action="store_true")
+    ap.add_argument("--skip-ft", action="store_true", help="跳过 FT-Transformer")
     args = ap.parse_args()
 
     for name in [n.strip() for n in args.datasets.split(",") if n.strip()]:
@@ -185,6 +190,8 @@ def main():
             train_trees(name, X_train, y_train, X_test, y_test, n_num)
         if not args.skip_mlp:
             train_mlp(name, Xn_tr, Xc_tr, y_train, Xn_te, Xc_te, y_test)
+        if not args.skip_ft:
+            train_ft(name, Xn_tr, Xc_tr, y_train, Xn_te, Xc_te, y_test)
 
 
 if __name__ == "__main__":
