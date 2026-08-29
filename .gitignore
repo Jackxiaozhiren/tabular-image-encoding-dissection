@@ -1,3 +1,45 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.env
+
+# macOS / editors
 .DS_Store
+.idea/
+.vscode/
+
+# Research data and trained artifacts (regenerated locally)
+data/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pkl
+*.joblib
+
+# Generated large figures/tables
+figures/
+outputs/
+results/
+
+# LaTeX/build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+build/
+dist/

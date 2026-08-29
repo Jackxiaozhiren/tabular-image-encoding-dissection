@@ -24,33 +24,32 @@ from datasets import DATASETS, DATA_DIR
 
 METRIC_NAMES = ["Accuracy", "Precision", "Recall", "F1", "AUC"]
 SEEDS = [42, 123, 2024]
-DATASETS_LIST = ["adult", "heart", "wine", "bank", "credit"]
+DATASETS_LIST = ["adult", "heart", "wine", "bank", "credit", "german", "telco",
+                 "sick", "australian", "cmc", "ilpd", "segment", "vehicle",
+                 "spambase", "magic"]
 
-# 每数据集的方法清单（含 M3 消融；heart 因小样本只跑 full）
-METHODS = {
-    "adult": ["XGBoost", "LightGBM", "CatBoost", "MLP",
-              "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-              "CNN-M3-noG", "CNN-M3-noB", "CNN-M3-corrB", "CNN-M3-shapB"],
-    "heart": ["XGBoost", "LightGBM", "CatBoost", "MLP",
-              "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-              "CNN-M3-noG", "CNN-M3-noB"],
-    "wine": ["XGBoost", "LightGBM", "CatBoost", "MLP",
-             "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-             "CNN-M3-noB", "CNN-M3-corrB", "CNN-M3-shapB"],
-    "bank": ["XGBoost", "LightGBM", "CatBoost", "MLP",
-             "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-             "CNN-M3-noG", "CNN-M3-noB"],
-    "credit": ["XGBoost", "LightGBM", "CatBoost", "MLP",
+# 全數值資料集（無類別特徵）：M1c ≡ M1、M3-noG ≡ M3-full，故不訓練
+NUMERIC_ONLY = {"wine", "segment", "vehicle", "spambase", "magic"}
+
+# 全部方法
+ALL_METHODS = ["XGBoost", "LightGBM", "CatBoost", "MLP", "FT-Transformer",
                "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-               "CNN-M3-noG", "CNN-M3-noB"],
+               "CNN-M3-noG", "CNN-M3-noB", "CNN-M3-corrB", "CNN-M3-shapB",
+               "CNN-M3-RG", "CNN-IGTD"]
+METHODS = {
+    ds: [m for m in ALL_METHODS
+         if not (ds in NUMERIC_ONLY and m in ("CNN-M1c", "CNN-M3-noG"))]
+    for ds in DATASETS_LIST
 }
 
 FILE_MAP = {
     "XGBoost": "xgb", "LightGBM": "lgb", "CatBoost": "cat", "MLP": "mlp",
+    "FT-Transformer": "ft",
     "CNN-M1": "cnn_M1", "CNN-M1c": "cnn_M1c", "CNN-M2": "cnn_M2",
     "CNN-M3-full": "cnn_M3-full", "CNN-M3-noG": "cnn_M3-noG",
     "CNN-M3-noB": "cnn_M3-noB", "CNN-M3-corrB": "cnn_M3-corrB",
-    "CNN-M3-shapB": "cnn_M3-shapB",
+    "CNN-M3-shapB": "cnn_M3-shapB", "CNN-M3-RG": "cnn_M3-RG",
+    "CNN-IGTD": "cnn_IGTD",
 }
 
 
@@ -111,10 +110,7 @@ def holm_bonferroni(pvals):
 
 def main():
     # ---------- 1. 每数据集对比表 ----------
-    per_seed_auc = {m: {} for m in ["XGBoost", "LightGBM", "CatBoost", "MLP",
-                                    "CNN-M1", "CNN-M1c", "CNN-M2", "CNN-M3-full",
-                                    "CNN-M3-noG", "CNN-M3-noB",
-                                    "CNN-M3-corrB", "CNN-M3-shapB"]}
+    per_seed_auc = {m: {} for m in ALL_METHODS}
     sig_out = {}
     for name in DATASETS_LIST:
         print(f"\n===== {DATASETS[name]['display']} =====")
@@ -154,31 +150,60 @@ def main():
         json.dump(sig_out, f, ensure_ascii=False, indent=1)
 
     # ---------- 2. 跨数据集 Wilcoxon signed-rank + Holm ----------
-    print("\n===== 跨数据集 Wilcoxon signed-rank（pooled seed×dataset，n=9） =====")
-    # 关键配对：相对 M3-full；另有 MLP 决定性对照
-    pairs = [("CNN-M1", "CNN-M3-full"), ("CNN-M1c", "CNN-M3-full"),
-             ("MLP", "CNN-M3-full"), ("XGBoost", "CNN-M3-full"),
-             ("CNN-M3-noB", "CNN-M3-full"), ("CNN-M1c", "MLP")]
-    wilcox = []
+    print("\n===== 跨数据集 Wilcoxon signed-rank（pooled seed×dataset） =====")
+    # 預設配對家族（10 對照）：類別納入 / 通道分離 / B 通道 / 重排 / 權重來源 /
+    # 影像形式 / 強力表格 DL / 樹 vs 影像
+    pairs = [("CNN-M1", "CNN-M3-full"),       # 類別納入（複合對照）
+             ("CNN-M3-noG", "CNN-M3-full"),   # 類別通道（乾淨）
+             ("CNN-M1c", "CNN-M3-RG"),        # 通道分離（乾淨，B 置零）
+             ("CNN-M3-RG", "CNN-M3-full"),    # B 通道有無
+             ("CNN-M3-noB", "CNN-M3-full"),   # 重排
+             ("CNN-M3-corrB", "CNN-M3-full"), # 權重來源（線性）
+             ("CNN-M3-shapB", "CNN-M3-full"), # 權重來源（SHAP）
+             ("MLP", "CNN-M3-full"),          # 影像形式
+             ("FT-Transformer", "MLP"),       # 強力表格 DL vs MLP 對照
+             ("XGBoost", "CNN-M3-full")]      # 樹 vs 影像
+
+    def _wp(d):
+        """双侧 signed-rank；处理全零与空数组退化情形。"""
+        if len(d) == 0 or np.all(d == 0):
+            return 1.0
+        return float(stats.wilcoxon(d, alternative="two-sided").pvalue)
+
+    # 收集每个配对的 (dataset, seed) 差异，供敏感性重算
+    pair_diffs = {}
     for a, b in pairs:
         va = np.array([per_seed_auc[a][k] for k in per_seed_auc[a]
                        if k in per_seed_auc[b]])
-        vb = np.array([per_seed_auc[b][k] for k in per_seed_auc[a]
-                       if k in per_seed_auc[b]])
-        if len(va) == 0 or len(vb) == 0:
+        if len(va) == 0:
             continue
-        diffs = va - vb
-        # 双侧 signed-rank；处理全部为零的退化情形
-        if np.all(diffs == 0):
-            p = 1.0
-        else:
-            p = float(stats.wilcoxon(diffs, alternative="two-sided").pvalue)
-        wmed = float(np.median(diffs))
-        wilcox.append({"a": a, "b": b, "n": len(va),
-                       "median_delta": wmed, "p": p,
-                       "mean_delta": float(diffs.mean())})
-        print(f"  {a:>14s} vs {b:14s}  n={len(va)}  "
-              f"median ΔAUC={wmed:+.4f}  p={p:.4f}")
+        keys = [k for k in per_seed_auc[a] if k in per_seed_auc[b]]
+        pair_diffs[(a, b)] = {k: (per_seed_auc[a][k] - per_seed_auc[b][k])
+                              for k in keys}
+
+    def _excl_heart(diffs):
+        return np.array([v for k, v in diffs.items() if k[0] != "heart"])
+
+    def _ds_medians(diffs):
+        by_ds = {}
+        for (ds, s), v in diffs.items():
+            by_ds.setdefault(ds, []).append(v)
+        return np.array([np.median(v) for v in by_ds.values()])
+
+    wilcox = []
+    for (a, b), diffs in pair_diffs.items():
+        diffs_all = np.array(list(diffs.values()))
+        h_excl = _excl_heart(diffs)
+        dmed = _ds_medians(diffs)
+        wilcox.append({
+            "a": a, "b": b, "n": len(diffs_all),
+            "median_delta": float(np.median(diffs_all)),
+            "p": _wp(diffs_all), "mean_delta": float(diffs_all.mean()),
+            "n_excl_heart": len(h_excl), "p_excl_heart": _wp(h_excl),
+            "n_datasets": len(dmed), "p_dataset_median": _wp(dmed),
+        })
+        print(f"  {a:>14s} vs {b:14s}  n={len(diffs_all)}  "
+              f"median ΔAUC={np.median(diffs_all):+.4f}  p={_wp(diffs_all):.4f}")
     # Holm-Bonferroni 校正（对配对集合）
     pvals = np.array([w["p"] for w in wilcox])
     reject = holm_bonferroni(pvals)
@@ -187,7 +212,8 @@ def main():
         print(f"    Holm-Bonferroni 拒绝: {rj}")
     with open(os.path.join(DATA_DIR, "extended_wilcoxon.json"), "w") as f:
         json.dump({"pairs": wilcox, "datasets": DATASETS_LIST,
-                   "n_seeds": len(SEEDS), "note": "pooled seed×dataset paired AUC"},
+                   "n_seeds": len(SEEDS),
+                   "note": "pooled seed×dataset paired AUC (+sensitivity: excl-Heart, dataset-median)"},
                   f, ensure_ascii=False, indent=1)
 
 

@@ -28,6 +28,7 @@ CNN 分類模型（PyTorch）— 對編碼圖像分類（支援 adult / heart + 
 import argparse
 import copy
 import os
+import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -54,10 +55,20 @@ os.makedirs(CKPT_DIR, exist_ok=True)
 SEEDS = [42, 123, 2024]
 WIDTH, HEIGHT, GRID = 64, 16, 4
 METRIC_NAMES = ["Accuracy", "Precision", "Recall", "F1", "AUC"]
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("mps" if torch.backends.mps.is_available()
+                      else "cuda" if torch.cuda.is_available() else "cpu")
+
+
+def enc_height(cfg) -> int:
+    """每資料集編碼高度：至少 16 列，且能容納全部數值+類別列。
+
+    M1c 需 n_num+n_cat 列；M3 的 R/G 通道各需 n_num/n_cat 列。
+    Credit（22 數值 + 1 類別）需要 23 列，故不能用固定 16。
+    """
+    return max(HEIGHT, len(cfg["numeric"]) + len(cfg["categorical"]))
 
 # 消融變體說明
-VARIANTS = ["full", "noG", "noB", "corrB", "shapB"]
+VARIANTS = ["full", "noG", "noB", "corrB", "shapB", "RG"]
 
 
 class TabularImageDataset(Dataset):
@@ -73,8 +84,10 @@ class TabularImageDataset(Dataset):
         return self.images[idx], self.labels[idx]
 
 
-def build_cnn(in_channels):
-    """小型 CNN：3 層捲積 + 全連接。輸入 (C, H, W)。"""
+def build_cnn(in_channels, backbone="probe"):
+    """CNN 骨架：小型 3 層探針（預設）或 ResNet 風格第二骨架。輸入 (C, H, W)。"""
+    if backbone == "resnet":
+        return build_resnet(in_channels)
     return nn.Sequential(
         nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
         nn.BatchNorm2d(16), nn.ReLU(inplace=True), nn.MaxPool2d(2),
@@ -85,6 +98,46 @@ def build_cnn(in_channels):
         nn.Flatten(), nn.Linear(64, 32), nn.ReLU(inplace=True),
         nn.Dropout(0.3), nn.Linear(32, 1),
     )
+
+
+class _ResBlock(nn.Module):
+    """殘差塊：主路徑兩層 3x3 卷積，stride 用於下採樣；shortcut 為 1x1。"""
+    def __init__(self, in_ch, out_ch, stride=1):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(out_ch))
+        self.skip = nn.Identity() if (stride == 1 and in_ch == out_ch) else \
+            nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, 1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_ch))
+
+    def forward(self, x):
+        return torch.relu(self.conv(x) + self.skip(x))
+
+
+def build_resnet(in_channels):
+    """ResNet 風格第二骨架：殘差塊 + 更深更寬，作為架構條件性檢查。"""
+    class ResNet(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.stem = nn.Sequential(
+                nn.Conv2d(in_channels, 32, 3, padding=1, bias=False),
+                nn.BatchNorm2d(32), nn.ReLU(inplace=True))
+            self.b1 = _ResBlock(32, 32)
+            self.b2 = _ResBlock(32, 64, stride=2)
+            self.b3 = _ResBlock(64, 128, stride=2)
+            self.head = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1), nn.Flatten(),
+                nn.Linear(128, 64), nn.ReLU(inplace=True),
+                nn.Dropout(0.3), nn.Linear(64, 1))
+
+        def forward(self, x):
+            return self.head(self.b3(self.b2(self.b1(self.stem(x)))))
+
+    return ResNet()
 
 
 def compute_metrics(y_true, y_pred, y_prob):
@@ -127,33 +180,44 @@ def make_dataset(mode, variant, name, cfg):
         return ohs
 
     if mode == "M1":
-        X_tr = np.stack([encode_m1(v, WIDTH)[0] for v in X_train_num])[:, None]
-        X_te = np.stack([encode_m1(v, WIDTH)[0] for v in X_test_num])[:, None]
+        # M1 高度 = 數值特徵數；墊到至少 4 列，避免低數值特徵資料集
+        # （如 cmc 僅 2 個數值特徵）在兩次 MaxPool2d 後高度塌縮為 0
+        m1_h = max(len(cfg["numeric"]), 4)
+        def _pad_m1(v):
+            img = encode_m1(v, WIDTH)[0]
+            if img.shape[0] < m1_h:
+                img = np.pad(img, ((0, m1_h - img.shape[0]), (0, 0)))
+            return img
+        X_tr = np.stack([_pad_m1(v) for v in X_train_num])[:, None]
+        X_te = np.stack([_pad_m1(v) for v in X_test_num])[:, None]
     elif mode == "M1c":
         # 單通道類別包容式編碼（驗證「多通道分離」是否必要）
         oh_tr, oh_te = cat_one_hot(X_train_cat), cat_one_hot(X_test_cat)
-        X_tr = np.stack([encode_m1_cat(v, oh_tr[i], WIDTH, HEIGHT)
+        H = enc_height(cfg)
+        X_tr = np.stack([encode_m1_cat(v, oh_tr[i], WIDTH, H)
                          for i, v in enumerate(X_train_num)])
-        X_te = np.stack([encode_m1_cat(v, oh_te[i], WIDTH, HEIGHT)
+        X_te = np.stack([encode_m1_cat(v, oh_te[i], WIDTH, H)
                          for i, v in enumerate(X_test_num)])
     elif mode == "M2":
         X_tr = np.stack([encode_m2(v, w_corr, GRID)[0] for v in X_train_num])[:, None]
         X_te = np.stack([encode_m2(v, w_corr, GRID)[0] for v in X_test_num])[:, None]
     else:  # M3 系列
         oh_tr, oh_te = cat_one_hot(X_train_cat), cat_one_hot(X_test_cat)
-        # 依變體決定權重來源與 G 通道
-        if variant == "noB":
-            w = None                       # 不重排
+        # 依變體決定權重來源、G 通道與 B 通道
+        zero_b = (variant == "RG")             # 純兩通道 R+G 控制（B 置零）
+        if variant in ("noB", "RG"):
+            w = None                           # 不重排
         elif variant == "corrB":
-            w = w_corr                     # 線性排序
+            w = w_corr                         # 線性排序
         elif variant == "shapB":
-            w = w_shap                     # SHAP 排序
-        else:                              # full / noG
-            w = w_imp                      # XGBoost 重要度
-        use_cat = variant != "noG"         # noG 移除類別通道
-        X_tr = np.stack([encode_m3(v, oh_tr[i], WIDTH, HEIGHT, w, use_cat)
+            w = w_shap                         # SHAP 排序
+        else:                                  # full / noG
+            w = w_imp                          # XGBoost 重要度
+        use_cat = variant != "noG"             # noG 移除類別通道
+        H = enc_height(cfg)
+        X_tr = np.stack([encode_m3(v, oh_tr[i], WIDTH, H, w, use_cat, zero_b)
                          for i, v in enumerate(X_train_num)])
-        X_te = np.stack([encode_m3(v, oh_te[i], WIDTH, HEIGHT, w, use_cat)
+        X_te = np.stack([encode_m3(v, oh_te[i], WIDTH, H, w, use_cat, zero_b)
                          for i, v in enumerate(X_test_num)])
     return X_tr, X_te
 
@@ -191,10 +255,11 @@ def evaluate(model, loader):
 
 
 def run_cnn(mode, variant, name, cfg, epochs=30, batch_size=256,
-            balanced=False, patience=7, verbose=True):
+            balanced=False, patience=7, verbose=True, backbone="probe"):
     """多種子訓練並評估單一編碼/變體，回傳 (指標 mean±std, 平均機率, 標籤)。"""
     tag = f"{mode}" if mode != "M3" else f"M3-{variant}"
-    print(f"\n===== 訓練 CNN（{tag}，{cfg['display']}） =====")
+    out_tag = tag if backbone == "probe" else f"{tag}_{backbone}"
+    print(f"\n===== 訓練 CNN（{tag}/{backbone}，{cfg['display']}） =====")
     X_tr, X_te = make_dataset(mode, variant, name, cfg)
     in_ch = 3 if mode == "M3" else 1
     test_ds = TabularImageDataset(X_te, np.load(
@@ -216,11 +281,13 @@ def run_cnn(mode, variant, name, cfg, epochs=30, batch_size=256,
 
         torch.manual_seed(seed)
         np.random.seed(seed)
-        model = build_cnn(in_ch).to(DEVICE)
+        model = build_cnn(in_ch, backbone).to(DEVICE)
         pos_weight = None
         if balanced:
             n_pos, n_neg = y_tr_sub.sum(), (y_tr_sub == 0).sum()
-            pos_weight = torch.tensor([n_neg / n_pos]).to(DEVICE)
+            # float32 explicitly: MPS does not support float64 tensors
+            pos_weight = torch.tensor([float(n_neg) / float(max(n_pos, 1))],
+                                      dtype=torch.float32).to(DEVICE)
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3,
                                      weight_decay=1e-4)
@@ -277,19 +344,19 @@ def run_cnn(mode, variant, name, cfg, epochs=30, batch_size=256,
     ax.set_title(f"CNN（{tag}）混淆矩陣（{cfg['display']}）")
     plt.colorbar(im, ax=ax, fraction=0.046)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIG_DIR, f"fig_cnn_confusion_{name}_{tag}.png"),
+    plt.savefig(os.path.join(FIG_DIR, f"fig_cnn_confusion_{name}_{out_tag}.png"),
                 dpi=150, bbox_inches="tight")
     plt.close()
 
     torch.save(model.state_dict(),
-               os.path.join(CKPT_DIR, f"cnn_{name}_{tag}.pt"))
-    np.savez(os.path.join(DATA_DIR, f"{name}_cnn_{tag}_results.npz"),
+               os.path.join(CKPT_DIR, f"cnn_{name}_{out_tag}.pt"))
+    np.savez(os.path.join(DATA_DIR, f"{name}_cnn_{out_tag}_results.npz"),
              probs=mean_probs, labels=labels, per_seed_probs=all_probs,
              per_seed_metrics=np.array([[m[k] for k in METRIC_NAMES]
                                         for m in all_metrics]),
              metric_names=np.array(METRIC_NAMES))
-    print(f"  已儲存 fig_cnn_confusion_{name}_{tag}.png、"
-          f"cnn_{name}_{tag}.pt、{name}_cnn_{tag}_results.npz")
+    print(f"  已儲存 fig_cnn_confusion_{name}_{out_tag}.png、"
+          f"cnn_{name}_{out_tag}.pt、{name}_cnn_{out_tag}_results.npz")
     return mean_metrics
 
 
@@ -304,6 +371,8 @@ def main():
     ap.add_argument("--tags", default=None,
                     help="（可選）直接指定要訓練的 tag 清單（如 M1,M2,M3-full,M3-noG），"
                          "指定後忽略 --variants；方便中斷後續跑")
+    ap.add_argument("--backbone", default="probe", choices=["probe", "resnet"],
+                    help="CNN 骨架：probe（小型 3 層，預設）或 resnet（ResNet 風格第二骨架）")
     args = ap.parse_args()
     name, cfg = args.dataset, DATASETS[args.dataset]
 
@@ -315,32 +384,39 @@ def main():
         tags += [f"M3-{v}" for v in variants if v in VARIANTS]
 
     results = {}
+    failures = []
+    bb = args.backbone
     for tag in tags:
         try:
             if tag == "M1":
                 results[tag] = run_cnn("M1", None, name, cfg, args.epochs,
-                                       balanced=args.balanced)
+                                       balanced=args.balanced, backbone=bb)
             elif tag == "M1c":
                 results[tag] = run_cnn("M1c", None, name, cfg, args.epochs,
-                                       balanced=args.balanced)
+                                       balanced=args.balanced, backbone=bb)
             elif tag == "M2":
                 results[tag] = run_cnn("M2", None, name, cfg, args.epochs,
-                                       balanced=args.balanced)
+                                       balanced=args.balanced, backbone=bb)
             elif tag.startswith("M3-"):
                 v = tag[3:]
                 if v not in VARIANTS:
                     print(f"[警告] 忽略未知變體: {v}")
                     continue
                 results[tag] = run_cnn("M3", v, name, cfg, args.epochs,
-                                       balanced=args.balanced)
+                                       balanced=args.balanced, backbone=bb)
             else:
                 print(f"[警告] 忽略未知 tag: {tag}")
         except Exception as e:
-            print(f"[錯誤] tag={tag} 訓練失敗：{e}，繼續下一個")
+            failures.append(tag)
+            print(f"[錯誤] tag={tag} 訓練失敗：{e}")
 
     print("\n===== 彙總（mean 指標） =====")
     for tag, m in results.items():
         print(f"  {tag:8s}: " + ", ".join(f"{k}={v:.4f}" for k, v in m.items()))
+
+    if failures:
+        print(f"[致命] 以下 tag 訓練失敗、結果檔不完整：{failures}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

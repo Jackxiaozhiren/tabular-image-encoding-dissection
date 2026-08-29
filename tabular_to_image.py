@@ -81,14 +81,17 @@ def encode_m1_cat(num_vec: np.ndarray, cat_oh: list, width: int = 64,
 
 
 def encode_m3(num_vec: np.ndarray, cat_oh: list, width: int = 64, height: int = 16,
-              weight_map: np.ndarray = None, use_cat: bool = True) -> np.ndarray:
+              weight_map: np.ndarray = None, use_cat: bool = True,
+              zero_b: bool = False) -> np.ndarray:
     """
     M3：三通道彩色編碼（本研究提出）。
       R 通道：數值特徵熱圖（前 height 列）；
       G 通道：類別特徵 one-hot 區塊（每類別特徵一列；use_cat=False 時置零，
              用於消融實驗驗證 G 通道的貢獻）；
       B 通道：依 weight_map（特徵重要度）降序重排的數值熱圖（權重重排；
-             weight_map=None 時等同 R 通道原順序，即不重排，用於消融）。
+             weight_map=None 時等同 R 通道原順序，即不重排，用於消融；
+             zero_b=True 時整個置零，形成純兩通道 R+G 控制，使 M1c-vs-M3-RG
+             乾淨隔離「通道分離」效應）。
     cat_oh：長度 = 類別特徵數的 list，每個元素是該特徵的 one-hot 向量。
     weight_map：長度 = 數值特徵數的權重陣列（例如 XGBoost 特徵重要度 / SHAP）。
     回傳 (3, height, width)。
@@ -109,13 +112,14 @@ def encode_m3(num_vec: np.ndarray, cat_oh: list, width: int = 64, height: int = 
             n = min(len(oh), width)
             G[j, :n] = np.clip(np.asarray(oh[:n], dtype=float), 0.0, 1.0)
 
-    # --- B 通道：權重重排（重要度越高越靠上；None 則不重排） ---
-    if weight_map is not None:
-        w = np.asarray(weight_map, dtype=float)
-        order = np.argsort(-w)
-        n_rep = min(len(order), height)
-        B[:n_rep] = _row_heatmap(num_vec[order[:n_rep]], width)
-    else:
-        B[:n_num] = _row_heatmap(num_vec[:n_num], width)
+    # --- B 通道：權重重排（重要度越高越靠上；None 則不重排；zero_b 則置零） ---
+    if not zero_b:
+        if weight_map is not None:
+            w = np.asarray(weight_map, dtype=float)
+            order = np.argsort(-w)
+            n_rep = min(len(order), height)
+            B[:n_rep] = _row_heatmap(num_vec[order[:n_rep]], width)
+        else:
+            B[:n_num] = _row_heatmap(num_vec[:n_num], width)
 
     return np.stack([R, G, B], axis=0)  # (3, H, W)

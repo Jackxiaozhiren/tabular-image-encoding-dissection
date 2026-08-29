@@ -24,6 +24,7 @@ plt.rcParams["font.sans-serif"] = ["Hiragino Sans", "PingFang SC",
 plt.rcParams["axes.unicode_minus"] = False
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                              f1_score, roc_auc_score, confusion_matrix)
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
@@ -76,8 +77,11 @@ def main():
             eval_metric="logloss", early_stopping_rounds=20,
             random_state=seed, n_jobs=-1,
         )
-        model.fit(X_train_s, y_train,
-                  eval_set=[(X_test_s, y_test)], verbose=False)
+        # 洩漏防護：以分層 10% 驗證集早停（原版誤用測試集早停，已修正與 07 一致）
+        Xtr_s, Xval, ytr_s, yval = train_test_split(
+            X_train_s, y_train, test_size=0.1, stratify=y_train,
+            random_state=seed)
+        model.fit(Xtr_s, ytr_s, eval_set=[(Xval, yval)], verbose=False)
         prob = model.predict_proba(X_test_s)[:, 1]
         pred = (prob >= 0.5).astype(int)
         all_probs.append(prob)
