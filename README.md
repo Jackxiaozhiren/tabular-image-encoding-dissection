@@ -4,6 +4,12 @@ Reproducibility repository for the Data Mining and Knowledge Discovery (DMKD) ma
 
 **Dissecting tabular-to-image encodings for CNNs: categorical features, not the image form, are the primary driver of accuracy gains**
 
+## Reviewer navigation
+
+- [Reproducibility guide](docs/REPRODUCIBILITY.md) · [Release notes](RELEASE_NOTES.md) · [Public release manifest](PUBLIC_RELEASE_MANIFEST.md)
+- The numbered scripts provide an auditable path from data preparation through baseline training, image encodings, sensitivity studies, and figure generation.
+- [Citation metadata](CITATION.cff) identifies the software artifact. A repository or manuscript description is **not** evidence of journal acceptance or publication.
+
 ## What the study finds
 
 Across 15 public tabular datasets and three fixed seeds (42, 123, 2024), the manuscript-active analysis isolates four design choices in tabular-to-image classifiers: categorical inclusion, channel separation, feature reordering, and the image form itself.
