@@ -1,6 +1,8 @@
 # Tabular-to-Image Encoding Dissection
 
-Reproducibility repository for the Data Mining and Knowledge Discovery (DMKD) manuscript:
+> **Publication status:** This is a research-code and validation record, not a peer-reviewed journal publication. Journal names and submission snapshots document earlier manuscript routes; a GitHub release or data/software DOI does not mean that a journal accepted the work.
+
+Research software and reproducibility materials for the study:
 
 **Dissecting tabular-to-image encodings for CNNs: categorical features, not the image form, are the primary driver of accuracy gains**
 
